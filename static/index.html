@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💬 聊天室</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            padding: 20px;
+        }
+
+        /* 登录界面 */
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .login-container h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .login-container h1 span {
+            font-size: 40px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c00;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .success-message {
+            background: #efe;
+            color: #060;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        /* 聊天界面 */
+        .chat-container {
+            display: none;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            height: 80vh;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h2 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .btn-logout {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-logout:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .chat-main {
+            display: flex;
+            height: calc(100% - 80px);
+        }
+
+        /* 成员列表 */
+        .members-sidebar {
+            width: 250px;
+            background: #f8f9fa;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .members-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .members-header h3 {
+            color: #333;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .members-count {
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        .members-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .member-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+
+        .member-item:hover {
+            background: #e9ecef;
+        }
+
+        .member-item.current-user {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .member-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            position: relative;
+        }
+
+        .status-indicator {
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .status-online {
+            background: #28a745;
+        }
+
+        .status-offline {
+            background: #dc3545;
+        }
+
+        .member-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .member-status {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* 聊天区域 */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.my-message {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .message.my-message .message-avatar {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .message-content {
+            max-width: 70%;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 5px;
+        }
+
+        .message.my-message .message-header {
+            flex-direction: row-reverse;
+        }
+
+        .message-username {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .message-bubble {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 18px;
+            border-top-left-radius: 4px;
+            color: #333;
+            line-height: 1.5;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .message.my-message .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-top-left-radius: 18px;
+            border-top-right-radius: 4px;
+        }
+
+        .message-input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+        }
+
+        .message-input-area input {
+            flex: 1;
+            padding: 14px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        .message-input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .message-input-area button {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .message-input-area button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .typing-indicator {
+            padding: 10px 20px;
+            font-size: 12px;
+            color: #888;
+            display: none;
+        }
+
+        /* 欢迎消息 */
+        .welcome-message {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .welcome-message span {
+            font-size: 48px;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .members-sidebar {
+                display: none;
+            }
+
+            .chat-container {
+                height: 100vh;
+                border-radius: 0;
+            }
+        }
+
+        /* 通知动画 */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 16px 24px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            display: none;
+            animation: slideIn 0.3s ease;
+            z-index: 1000;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(100px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .notification.show {
+            display: block;
+        }
+
+        .notification.success {
+            border-left: 4px solid #28a745;
+        }
+
+        .notification.error {
+            border-left: 4px solid #dc3545;
+        }
+
+        .notification.info {
+            border-left: 4px solid #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 登录界面 -->
+        <div class="login-container" id="loginContainer">
+            <h1><span>💬</span> 聊天室</h1>
+            
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+            
+            <div id="loginForm">
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input type="text" id="username" placeholder="请输入用户名" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" placeholder="请输入密码" autocomplete="current-password">
+                </div>
+                <button class="btn btn-primary" onclick="login()">登录</button>
+                <button class="btn btn-secondary" onclick="showRegister()">注册新账号</button>
+            </div>
+            
+            <div id="registerForm" style="display: none;">
+                <div class="form-group">
+                    <label for="regUsername">用户名</label>
+                    <input type="text" id="regUsername" placeholder="请输入用户名" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="regPassword">密码</label>
+                    <input type="password" id="regPassword" placeholder="请输入密码" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="regPassword2">确认密码</label>
+                    <input type="password" id="regPassword2" placeholder="请再次输入密码" autocomplete="new-password">
+                </div>
+                <button class="btn btn-primary" onclick="register()">注册</button>
+                <button class="btn btn-secondary" onclick="showLogin()">返回登录</button>
+            </div>
+        </div>
+
+        <!-- 聊天界面 -->
+        <div class="chat-container" id="chatContainer">
+            <div class="chat-header">
+                <h2>💬 聊天室</h2>
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">👤</div>
+                    <span id="currentUsername">用户名</span>
+                    <button class="btn-logout" onclick="logout()">退出</button>
+                </div>
+            </div>
+            
+            <div class="chat-main">
+                <!-- 成员列表 -->
+                <div class="members-sidebar">
+                    <div class="members-header">
+                        <h3>👥 成员列表 <span class="members-count" id="membersCount">0</span></h3>
+                    </div>
+                    <div class="members-list" id="membersList">
+                        <!-- 成员列表将通过 JS 动态生成 -->
+                    </div>
+                </div>
+                
+                <!-- 聊天区域 -->
+                <div class="chat-area">
+                    <div class="messages-container" id="messagesContainer">
+                        <div class="welcome-message">
+                            <span>👋</span>
+                            <p>欢迎来到聊天室！</p>
+                            <p>开始发送消息吧~</p>
+                        </div>
+                    </div>
+                    <div class="typing-indicator" id="typingIndicator">有人正在输入...</div>
+                    <div class="message-input-area">
+                        <input type="text" id="messageInput" placeholder="输入消息..." onkeypress="handleKeyPress(event)">
+                        <button onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知 -->
+    <div class="notification" id="notification"></div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let ws = null;
+        let currentUser = null;
+        let onlineUsers = new Set();
+
+        // 显示通知
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        // 显示登录表单
+        function showLogin() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+        }
+
+        // 显示注册表单
+        function showRegister() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+        }
+
+        // 用户注册
+        async function register() {
+            const username = document.getElementById('regUsername').value.trim();
+            const password = document.getElementById('regPassword').value;
+            const password2 = document.getElementById('regPassword2').value;
+
+            if (!username || !password) {
+                showError('请填写完整信息');
+                return;
+            }
+
+            if (password !== password2) {
+                showError('两次密码不一致');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showSuccess('注册成功！请登录');
+                    showLogin();
+                    document.getElementById('username').value = username;
+                } else {
+                    showError(data.detail || '注册失败');
+                }
+            } catch (error) {
+                showError('网络错误，请重试');
+            }
+        }
+
+        // 用户登录
+        async function login() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showError('请填写用户名和密码');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    localStorage.setItem('token', data.access_token);
+                    localStorage.setItem('username', username);
+                    currentUser = username;
+                    showChatInterface();
+                    showNotification(`欢迎回来，${username}！`, 'success');
+                } else {
+                    showError(data.detail || '登录失败');
+                }
+            } catch (error) {
+                showError('网络错误，请重试');
+            }
+        }
+
+        // 显示聊天界面
+        function showChatInterface() {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('chatContainer').style.display = 'block';
+            document.getElementById('currentUsername').textContent = currentUser;
+            document.getElementById('userAvatar').textContent = currentUser.charAt(0).toUpperCase();
+
+            connectWebSocket();
+            loadMessages();
+        }
+
+        // 连接 WebSocket
+        function connectWebSocket() {
+            const token = localStorage.getItem('token');
+            const wsUrl = `ws://${window.location.host}/ws/${token}`;
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                let reconnectAttempts = 0;
+                const maxReconnectAttempts = 5;
+                let heartbeatInterval = null;
+
+                ws.onopen = () => {
+                    reconnectAttempts = 0;
+                    updateMembersList();
+                    showNotification('已连接', 'success');
+                    
+                    // 启动心跳检测 (每25秒)
+                    heartbeatInterval = setInterval(() => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send('PING');
+                        }
+                    }, 25000);
+                };
+
+                ws.onmessage = (event) => {
+                    const data = event.data;
+                    
+                    // 忽略心跳消息
+                    if (data === 'PONG') return;
+                    
+                    if (data.startsWith('USER_LIST:')) {
+                        const users = data.replace('USER_LIST:', '').split(',').filter(u => u);
+                        onlineUsers = new Set(users);
+                        updateMembersList();
+                    } else if (data.startsWith('NEW_MESSAGE:')) {
+                        const parts = data.split(':');
+                        if (parts.length >= 4) {
+                            const username = parts[1];
+                            const content = parts[2];
+                            const time = parts[3];
+                            addMessage(username, content, time, false);
+                        }
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    if (heartbeatInterval) {
+                        clearInterval(heartbeatInterval);
+                    }
+                    
+                    if (event.code !== 4001 && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                        setTimeout(connectWebSocket, delay);
+                    } else if (reconnectAttempts >= maxReconnectAttempts) {
+                        showNotification('连接已断开', 'error');
+                    }
+                };
+
+                ws.onerror = () => {
+                    // 静默处理错误，避免频繁提示
+                };
+            } catch (error) {
+                // 静默处理
+            }
+        }
+
+        // 更新成员列表
+        function updateMembersList() {
+            const membersList = document.getElementById('membersList');
+            const membersCount = document.getElementById('membersCount');
+            
+            membersCount.textContent = onlineUsers.size;
+            
+            let html = '';
+            onlineUsers.forEach(username => {
+                const isCurrentUser = username === currentUser;
+                const statusClass = onlineUsers.has(username) ? 'status-online' : 'status-offline';
+                
+                html += `
+                    <div class="member-item ${isCurrentUser ? 'current-user' : ''}">
+                        <div class="member-avatar">
+                            ${username.charAt(0).toUpperCase()}
+                            <div class="status-indicator ${statusClass}"></div>
+                        </div>
+                        <div>
+                            <div class="member-name">${username} ${isCurrentUser ? '(我)' : ''}</div>
+                            <div class="member-status">${onlineUsers.has(username) ? '在线' : '离线'}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            membersList.innerHTML = html;
+        }
+
+        // 加载历史消息
+        async function loadMessages() {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_BASE}/messages/?limit=50`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const messages = await response.json();
+                    messages.forEach(msg => {
+                        const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                        });
+                        addMessage(msg.username, msg.content, time, msg.username === currentUser);
+                    });
+                }
+            } catch (error) {
+                console.error('加载消息失败:', error);
+            }
+        }
+
+        // 添加消息到界面
+        function addMessage(username, content, time, isMyMessage) {
+            const container = document.getElementById('messagesContainer');
+            
+            // 移除欢迎消息
+            const welcomeMsg = container.querySelector('.welcome-message');
+            if (welcomeMsg) {
+                welcomeMsg.remove();
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isMyMessage ? 'my-message' : ''}`;
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">${username.charAt(0).toUpperCase()}</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-username">${username}</span>
+                        <span class="message-time">${time}</span>
+                    </div>
+                    <div class="message-bubble">${escapeHtml(content)}</div>
+                </div>
+            `;
+            
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 发送消息
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+            
+            if (!content) return;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(`MESSAGE:${content}`);
+                input.value = '';
+            }
+        }
+
+        // 处理键盘输入
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // 退出登录
+        function logout() {
+            if (ws) {
+                ws.close();
+            }
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            currentUser = null;
+            onlineUsers.clear();
+            
+            document.getElementById('chatContainer').style.display = 'none';
+            document.getElementById('loginContainer').style.display = 'block';
+            document.getElementById('messagesContainer').innerHTML = `
+                <div class="welcome-message">
+                    <span>👋</span>
+                    <p>欢迎来到聊天室！</p>
+                    <p>开始发送消息吧~</p>
+                </div>
+            `;
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 页面加载时检查登录状态
+        window.onload = () => {
+            const token = localStorage.getItem('token');
+            const username = localStorage.getItem('username');
+            
+            if (token && username) {
+                currentUser = username;
+                showChatInterface();
+            }
+        };
+    </script>
+</body>
+</html>
