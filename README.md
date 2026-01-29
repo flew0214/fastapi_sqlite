@@ -417,7 +417,3 @@ http://localhost:8000
 - 生产环境请修改 `SECRET_KEY` 为更复杂的值
 - 密码使用 bcrypt 算法加密存储
 - 使用 JWT 进行身份验证，设置过期时间 30 分钟
-
-## 📄 许可证
-
-MIT License

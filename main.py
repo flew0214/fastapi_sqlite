@@ -8,7 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
+from uuid import uuid4
 import os
 import logging
 import models
@@ -80,28 +81,34 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        # session_id -> (websocket, username)
+        self.active_connections: Dict[str, Tuple[WebSocket, str]] = {}
 
-    async def connect(self, websocket: WebSocket, username: str):
+    async def connect(self, websocket: WebSocket, username: str) -> str:
         await websocket.accept()
-        self.active_connections[username] = websocket
+        session_id = str(uuid4())
+        self.active_connections[session_id] = (websocket, username)
         await self.broadcast_user_list()
+        return session_id
 
-    def disconnect(self, username: str):
-        if username in self.active_connections:
-            del self.active_connections[username]
+    def disconnect(self, session_id: str):
+        if session_id in self.active_connections:
+            del self.active_connections[session_id]
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
     async def broadcast_user_list(self):
-        user_list = list(self.active_connections.keys())
-        message = f"USER_LIST:{','.join(user_list)}"
-        for username, connection in self.active_connections.items():
+        # 收集所有唯一的用户名
+        user_list = set()
+        for session_id, (connection, username) in self.active_connections.items():
+            user_list.add(username)
+        message = f"USER_LIST:{','.join(sorted(user_list))}"
+        for session_id, (connection, username) in self.active_connections.items():
             await connection.send_text(message)
 
     async def broadcast_message(self, message: str):
-        for username, connection in self.active_connections.items():
+        for session_id, (connection, username) in self.active_connections.items():
             await connection.send_text(message)
 
 manager = ConnectionManager()
@@ -123,8 +130,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         await websocket.close(code=4001)
         return
 
-    await manager.connect(websocket, username)
-    logger.info(f"WebSocket 连接建立, 当前在线: {list(manager.active_connections.keys())}")
+    session_id = await manager.connect(websocket, username)
+    logger.info(f"WebSocket 连接建立: {username} (session: {session_id[:8]}), 当前在线数: {len(manager.active_connections)}")
     
     try:
         while True:
@@ -164,9 +171,9 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                 break
                 
     except WebSocketDisconnect:
-        manager.disconnect(username)
+        manager.disconnect(session_id)
         await manager.broadcast_user_list()
-        logger.info(f"WebSocket 断开: {username}, 当前在线: {list(manager.active_connections.keys())}")
+        logger.info(f"WebSocket 断开: {username} (session: {session_id[:8]}), 当前在线数: {len(manager.active_connections)}")
 
 @app.post("/register", response_model=schemas.UserResponse)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -238,7 +245,11 @@ def read_users_me(current_user: User = Depends(get_current_user)):
 
 @app.get("/users/online")
 def get_online_users():
-    return {"online_users": list(manager.active_connections.keys())}
+    # 收集所有唯一的用户名
+    user_list = set()
+    for session_id, (connection, username) in manager.active_connections.items():
+        user_list.add(username)
+    return {"online_users": list(user_list)}
 
 @app.get("/")
 async def root():
