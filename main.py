@@ -84,39 +84,113 @@ class ConnectionManager:
         # session_id -> (websocket, username)
         self.active_connections: Dict[str, Tuple[WebSocket, str]] = {}
 
+    def cleanup_closed_connections(self):
+        """清理已关闭的 WebSocket 连接"""
+        closed_sessions = []
+        for session_id, (connection, username) in self.active_connections.items():
+            try:
+                # 检查连接状态
+                state = connection.client_state.name
+                if state != "CONNECTED":
+                    closed_sessions.append(session_id)
+            except Exception:
+                # 连接异常，标记移除
+                closed_sessions.append(session_id)
+
+        for session_id in closed_sessions:
+            logger.debug(f"清理失效连接: {session_id[:8]}")
+            if session_id in self.active_connections:
+                del self.active_connections[session_id]
+
+        return len(closed_sessions)
+
     async def connect(self, websocket: WebSocket, username: str) -> str:
+        # 连接前先清理失效的连接
+        self.cleanup_closed_connections()
+
         await websocket.accept()
         session_id = str(uuid4())
         self.active_connections[session_id] = (websocket, username)
+        logger.info(f"添加新连接: {username} (session: {session_id[:8]})")
+
+        # 清理后再次广播用户列表
         await self.broadcast_user_list()
         return session_id
 
     def disconnect(self, session_id: str):
+        logger.info(f"断开连接请求: {session_id[:8]}")
         if session_id in self.active_connections:
             del self.active_connections[session_id]
+            logger.info(f"已移除连接: {session_id[:8]}")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
     async def broadcast_user_list(self):
+        # 先清理失效连接
+        self.cleanup_closed_connections()
+
         # 收集所有唯一的用户名
         user_list = set()
         for session_id, (connection, username) in self.active_connections.items():
-            user_list.add(username)
+            try:
+                # double check connection state
+                if connection.client_state.name == "CONNECTED":
+                    user_list.add(username)
+            except Exception:
+                # 连接异常，应该已被清理，跳过
+                continue
+
+        if not user_list:
+            return
+
         message = f"USER_LIST:{','.join(sorted(user_list))}"
+        failed_sessions = []
+
         for session_id, (connection, username) in self.active_connections.items():
-            await connection.send_text(message)
+            try:
+                if connection.client_state.name == "CONNECTED":
+                    await connection.send_text(message)
+            except Exception as e:
+                logger.debug(f"发送用户列表失败 {session_id[:8]}: {e}")
+                failed_sessions.append(session_id)
+
+        # 清理发送失败的连接
+        for session_id in failed_sessions:
+            if session_id in self.active_connections:
+                del self.active_connections[session_id]
+
+        logger.debug(f"广播用户列表: {user_list}")
 
     async def broadcast_message(self, message: str):
+        # 先清理失效连接
+        self.cleanup_closed_connections()
+
+        failed_sessions = []
         for session_id, (connection, username) in self.active_connections.items():
-            await connection.send_text(message)
+            try:
+                if connection.client_state.name == "CONNECTED":
+                    await connection.send_text(message)
+            except Exception as e:
+                logger.debug(f"发送消息失败 {session_id[:8]}: {e}")
+                failed_sessions.append(session_id)
+
+        # 清理发送失败的连接
+        for session_id in failed_sessions:
+            if session_id in self.active_connections:
+                del self.active_connections[session_id]
 
 manager = ConnectionManager()
 
 @app.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str):
     logger.info(f"WebSocket 连接尝试, token 长度: {len(token)}")
-    
+
+    # 先清理所有失效的连接
+    closed_count = manager.cleanup_closed_connections()
+    if closed_count > 0:
+        logger.info(f"清理了 {closed_count} 个失效连接")
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -227,6 +301,20 @@ def get_messages(limit: int = 50, db: Session = Depends(get_db), current_user: U
             created_at=msg.created_at
         ))
     return result[::-1]
+
+@app.delete("/messages/all")
+def clear_all_messages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """清空所有历史消息"""
+    try:
+        count = db.query(Message).count()
+        db.query(Message).delete()
+        db.commit()
+        logger.info(f"用户 {current_user.username} 清空了 {count} 条历史消息")
+        return {"detail": f"Cleared {count} messages"}
+    except Exception as e:
+        logger.error(f"清空消息失败: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to clear messages")
 
 @app.delete("/messages/{message_id}")
 def delete_message(message_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

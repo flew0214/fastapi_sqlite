@@ -576,6 +576,7 @@
                 <div class="user-info">
                     <div class="user-avatar" id="userAvatar">👤</div>
                     <span id="currentUsername">用户名</span>
+                    <button class="btn-logout" style="margin-right: 8px;" onclick="clearMessages()" title="清空历史消息">🗑️ 清空</button>
                     <button class="btn-logout" onclick="logout()">退出</button>
                 </div>
             </div>
@@ -931,6 +932,40 @@
             `;
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
+        }
+
+        // 清空历史消息
+        async function clearMessages() {
+            if (!confirm('确定要清空所有历史消息吗？此操作不可恢复。')) {
+                return;
+            }
+
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_BASE}/messages/all`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showNotification(data.detail, 'success');
+
+                    // 清空界面上的消息
+                    document.getElementById('messagesContainer').innerHTML = `
+                        <div class="welcome-message">
+                            <span>👋</span>
+                            <p>欢迎来到聊天室！</p>
+                            <p>开始发送消息吧~</p>
+                        </div>
+                    `;
+                } else {
+                    const errorData = await response.json();
+                    showNotification(errorData.detail || '清空消息失败', 'error');
+                }
+            } catch (error) {
+                showNotification('网络错误，请重试', 'error');
+            }
         }
 
         // HTML 转义
