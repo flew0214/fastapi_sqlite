@@ -574,6 +574,12 @@
             <div class="chat-header">
                 <h2>💬 聊天室</h2>
                 <div class="user-info">
+                    <div class="channel-selector" style="display: flex; align-items: center; gap: 8px;">
+                        <select id="channelSelect" onchange="switchChannel()" style="padding: 8px 12px; border: 1px solid #e8e8e8; border-radius: 6px; font-size: 14px; background: white; color: #262626; cursor: pointer;">
+                            <option value="default">默认频道</option>
+                        </select>
+                        <button onclick="showAddChannelDialog()" style="padding: 8px 12px; border: 1px solid #e8e8e8; border-radius: 6px; background: white; color: #595959; cursor: pointer; font-size: 14px;">➕</button>
+                    </div>
                     <div class="user-avatar" id="userAvatar">👤</div>
                     <span id="currentUsername">用户名</span>
                     <button class="btn-logout" style="margin-right: 8px;" onclick="clearMessages()" title="清空历史消息">🗑️ 清空</button>
@@ -614,11 +620,25 @@
     <!-- 通知 -->
     <div class="notification" id="notification"></div>
 
+    <!-- 添加频道对话框 -->
+    <div id="addChannelModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); min-width: 320px; max-width: 90%;">
+            <h3 style="margin-bottom: 16px; color: #1a1a1a;">添加新频道</h3>
+            <input type="text" id="newChannelName" placeholder="请输入频道名称" style="width: 100%; padding: 10px 12px; border: 1px solid #e8e8e8; border-radius: 6px; margin-bottom: 16px; font-size: 14px;" onkeypress="if(event.key==='Enter') createChannel()">
+            <div style="display: flex; gap: 8px;">
+                <button onclick="hideAddChannelDialog()" style="flex: 1; padding: 10px; border: 1px solid #e8e8e8; border-radius: 6px; background: white; color: #595959; cursor: pointer; font-size: 14px;">取消</button>
+                <button onclick="createChannel()" style="flex: 1; padding: 10px; border: none; border-radius: 6px; background: #4dabf7; color: white; cursor: pointer; font-size: 14px;">创建</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API_BASE = window.location.origin;
         let ws = null;
         let currentUser = null;
         let onlineUsers = new Set();
+        let currentChannel = 'default';
+        let currentChannels = ['default'];
 
         // 显示通知
         function showNotification(message, type = 'info') {
@@ -740,6 +760,7 @@
             document.getElementById('currentUsername').textContent = currentUser;
             document.getElementById('userAvatar').textContent = currentUser.charAt(0).toUpperCase();
 
+            loadChannels();
             connectWebSocket();
             loadMessages();
         }
@@ -747,7 +768,7 @@
         // 连接 WebSocket
         function connectWebSocket() {
             const token = localStorage.getItem('token');
-            const wsUrl = `ws://${window.location.host}/ws/${token}`;
+            const wsUrl = `ws://${window.location.host}/ws/${token}?channel=${encodeURIComponent(currentChannel)}`;
             
             try {
                 ws = new WebSocket(wsUrl);
@@ -770,21 +791,65 @@
 
                 ws.onmessage = (event) => {
                     const data = event.data;
-                    
+
                     // 忽略心跳消息
                     if (data === 'PONG') return;
-                    
+
                     if (data.startsWith('USER_LIST:')) {
                         const users = data.replace('USER_LIST:', '').split(',').filter(u => u);
                         onlineUsers = new Set(users);
                         updateMembersList();
                     } else if (data.startsWith('NEW_MESSAGE:')) {
-                        const parts = data.split(':');
-                        if (parts.length >= 4) {
-                            const username = parts[1];
-                            const content = parts[2];
-                            const time = parts[3];
-                            addMessage(username, content, time, false);
+                        // 格式：NEW_MESSAGE:username:content:time:channel
+                        console.log('收到消息:', data);
+                        console.log('当前频道:', currentChannel);
+
+                        const prefix = 'NEW_MESSAGE:';
+                        const remaining = data.substring(prefix.length);
+
+                        // 从前向后找到第1个冒号 -> 分隔 username 和后面的内容
+                        const firstColonIndex = remaining.indexOf(':');
+                        if (firstColonIndex <= 0) {
+                            console.error('无法找到username分隔符');
+                            return;
+                        }
+                        const username = remaining.substring(0, firstColonIndex);
+
+                        // 从后向前找第1个冒号 -> 分隔 time 和 channel
+                        const lastColonIndex = remaining.lastIndexOf(':');
+                        if (lastColonIndex <= 0) {
+                            console.error('无法找到channel分隔符');
+                            return;
+                        }
+                        const msgChannel = remaining.substring(lastColonIndex + 1);
+
+                        // 从后向前找第2个冒号 -> 分隔 content 和 time（假设time是 HH:MM）
+                        let timestampStartIndex = -1;
+                        let colonCount = 0;
+                        for (let i = lastColonIndex - 1; i >= 0; i--) {
+                            if (remaining[i] === ':') {
+                                colonCount++;
+                                if (colonCount === 2) {
+                                    timestampStartIndex = i;
+                                    break;
+                                }
+                            }
+                        }
+                        if (timestampStartIndex <= 0) {
+                            console.error('无法找到timestamp分隔符');
+                            return;
+                        }
+
+                        const time = remaining.substring(timestampStartIndex + 1, lastColonIndex);
+                        const content = remaining.substring(firstColonIndex + 1, timestampStartIndex);
+
+                        console.log('解析结果:', { username, content, time, msgChannel });
+
+                        // 只显示当前频道的消息
+                        if (msgChannel === currentChannel) {
+                            addMessage(username, content, time, username === currentUser);
+                        } else {
+                            console.log('消息来自其他频道，忽略');
                         }
                     }
                 };
@@ -844,16 +909,16 @@
         async function loadMessages() {
             try {
                 const token = localStorage.getItem('token');
-                const response = await fetch(`${API_BASE}/messages/?limit=50`, {
+                const response = await fetch(`${API_BASE}/messages/?limit=50&channel=${encodeURIComponent(currentChannel)}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
 
                 if (response.ok) {
                     const messages = await response.json();
                     messages.forEach(msg => {
-                        const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
+                        const time = new Date(msg.created_at).toLocaleTimeString('zh-CN', {
+                            hour: '2-digit',
+                            minute: '2-digit'
                         });
                         addMessage(msg.username, msg.content, time, msg.username === currentUser);
                     });
@@ -861,6 +926,13 @@
             } catch (error) {
                 console.error('加载消息失败:', error);
             }
+        }
+
+        // HTML 转义（防止XSS攻击）
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // 添加消息到界面
@@ -968,18 +1040,141 @@
             }
         }
 
-        // HTML 转义
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        // 加载频道列表
+        async function loadChannels() {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_BASE}/channels`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentChannels = data.channels || ['default'];
+                    updateChannelSelect();
+                }
+            } catch (error) {
+                console.error('加载频道失败:', error);
+            }
+        }
+
+        // 更新频道选择器
+        function updateChannelSelect() {
+            const select = document.getElementById('channelSelect');
+            select.innerHTML = '';
+
+            currentChannels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel;
+                option.textContent = channel === 'default' ? '默认频道' : channel;
+                select.appendChild(option);
+            });
+
+            select.value = currentChannel;
+        }
+
+        // 切换频道
+        function switchChannel() {
+            const select = document.getElementById('channelSelect');
+            const newChannel = select.value;
+
+            if (newChannel === currentChannel) {
+                return;
+            }
+
+            // 关闭现有连接
+            if (ws) {
+                ws.close();
+            }
+
+            // 更新当前频道
+            currentChannel = newChannel;
+            console.log(`切换到频道: ${currentChannel}`);
+
+            // 清空消息列表
+            document.getElementById('messagesContainer').innerHTML = `
+                <div class="welcome-message">
+                    <span>👋</span>
+                    <p>欢迎来到频道: ${currentChannel === 'default' ? '默认频道' : currentChannel}</p>
+                    <p>开始发送消息吧~</p>
+                </div>
+            `;
+
+            // 重新加载消息和连接 WebSocket
+            loadMessages();
+            connectWebSocket();
+
+            showNotification(`已切换到: ${currentChannel === 'default' ? '默认频道' : currentChannel}`, 'success');
+        }
+
+        // 显示添加频道对话框
+        function showAddChannelDialog() {
+            document.getElementById('addChannelModal').style.display = 'flex';
+            document.getElementById('newChannelName').value = '';
+            document.getElementById('newChannelName').focus();
+        }
+
+        // 隐藏添加频道对话框
+        function hideAddChannelDialog() {
+            document.getElementById('addChannelModal').style.display = 'none';
+        }
+
+        // 创建新频道
+        function createChannel() {
+            const channelName = document.getElementById('newChannelName').value.trim();
+
+            if (!channelName) {
+                alert('请输入频道名称');
+                return;
+            }
+
+            if (channelName === 'default') {
+                alert('默认频道已存在');
+                return;
+            }
+
+            if (currentChannels.includes(channelName)) {
+                alert('频道已存在');
+                return;
+            }
+
+            // 添加新频道
+            currentChannels.push(channelName);
+            updateChannelSelect();
+
+            // 切换到新频道
+            currentChannel = channelName;
+            document.getElementById('channelSelect').value = currentChannel;
+
+            // 清空消息列表
+            document.getElementById('messagesContainer').innerHTML = `
+                <div class="welcome-message">
+                    <span>👋</span>
+                    <p>欢迎来到频道: ${channelName}</p>
+                    <p>发送第一条消息来激活频道~</p>
+                </div>
+            `;
+
+            // 隐藏对话框并重新连接
+            hideAddChannelDialog();
+
+            // 关闭现有连接
+            if (ws) {
+                ws.close();
+            }
+
+            // 重新加载消息和连接 WebSocket
+            loadMessages();
+            connectWebSocket();
+
+            showNotification(`已创建并切换到频道: ${channelName}`, 'success');
         }
 
         // 页面加载时检查登录状态
         window.onload = () => {
             const token = localStorage.getItem('token');
             const username = localStorage.getItem('username');
-            
+
             if (token && username) {
                 currentUser = username;
                 showChatInterface();

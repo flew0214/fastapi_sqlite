@@ -81,13 +81,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 class ConnectionManager:
     def __init__(self):
-        # session_id -> (websocket, username)
-        self.active_connections: Dict[str, Tuple[WebSocket, str]] = {}
+        # session_id -> (websocket, username, channel)
+        self.active_connections: Dict[str, Tuple[WebSocket, str, str]] = {}
 
     def cleanup_closed_connections(self):
         """清理已关闭的 WebSocket 连接"""
         closed_sessions = []
-        for session_id, (connection, username) in self.active_connections.items():
+        for session_id, (connection, username, channel) in self.active_connections.items():
             try:
                 # 检查连接状态
                 state = connection.client_state.name
@@ -104,17 +104,17 @@ class ConnectionManager:
 
         return len(closed_sessions)
 
-    async def connect(self, websocket: WebSocket, username: str) -> str:
+    async def connect(self, websocket: WebSocket, username: str, channel: str = "default") -> str:
         # 连接前先清理失效的连接
         self.cleanup_closed_connections()
 
         await websocket.accept()
         session_id = str(uuid4())
-        self.active_connections[session_id] = (websocket, username)
-        logger.info(f"添加新连接: {username} (session: {session_id[:8]})")
+        self.active_connections[session_id] = (websocket, username, channel)
+        logger.info(f"添加新连接: {username} (session: {session_id[:8]}, channel: {channel})")
 
-        # 清理后再次广播用户列表
-        await self.broadcast_user_list()
+        # 广播用户列表（当前频道）
+        await self.broadcast_user_list(channel)
         return session_id
 
     def disconnect(self, session_id: str):
@@ -126,16 +126,16 @@ class ConnectionManager:
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
-    async def broadcast_user_list(self):
+    async def broadcast_user_list(self, channel: str = "default"):
         # 先清理失效连接
         self.cleanup_closed_connections()
 
-        # 收集所有唯一的用户名
+        # 收集当前频道的唯一用户名
         user_list = set()
-        for session_id, (connection, username) in self.active_connections.items():
+        for session_id, (connection, username, user_channel) in self.active_connections.items():
             try:
-                # double check connection state
-                if connection.client_state.name == "CONNECTED":
+                # 只收集当前频道的用户
+                if user_channel == channel and connection.client_state.name == "CONNECTED":
                     user_list.add(username)
             except Exception:
                 # 连接异常，应该已被清理，跳过
@@ -147,9 +147,10 @@ class ConnectionManager:
         message = f"USER_LIST:{','.join(sorted(user_list))}"
         failed_sessions = []
 
-        for session_id, (connection, username) in self.active_connections.items():
+        for session_id, (connection, username, user_channel) in self.active_connections.items():
             try:
-                if connection.client_state.name == "CONNECTED":
+                # 只向当前频道的用户广播
+                if user_channel == channel and connection.client_state.name == "CONNECTED":
                     await connection.send_text(message)
             except Exception as e:
                 logger.debug(f"发送用户列表失败 {session_id[:8]}: {e}")
@@ -160,16 +161,17 @@ class ConnectionManager:
             if session_id in self.active_connections:
                 del self.active_connections[session_id]
 
-        logger.debug(f"广播用户列表: {user_list}")
+        logger.debug(f"广播用户列表 [{channel}]: {user_list}")
 
-    async def broadcast_message(self, message: str):
+    async def broadcast_message(self, message: str, channel: str = "default"):
         # 先清理失效连接
         self.cleanup_closed_connections()
 
         failed_sessions = []
-        for session_id, (connection, username) in self.active_connections.items():
+        for session_id, (connection, username, user_channel) in self.active_connections.items():
             try:
-                if connection.client_state.name == "CONNECTED":
+                # 只向当前频道的用户广播
+                if user_channel == channel and connection.client_state.name == "CONNECTED":
                     await connection.send_text(message)
             except Exception as e:
                 logger.debug(f"发送消息失败 {session_id[:8]}: {e}")
@@ -183,8 +185,8 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @app.websocket("/ws/{token}")
-async def websocket_endpoint(websocket: WebSocket, token: str):
-    logger.info(f"WebSocket 连接尝试, token 长度: {len(token)}")
+async def websocket_endpoint(websocket: WebSocket, token: str, channel: str = "default"):
+    logger.info(f"WebSocket 连接尝试, token 长度: {len(token)}, channel: {channel}")
 
     # 先清理所有失效的连接
     closed_count = manager.cleanup_closed_connections()
@@ -204,8 +206,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         await websocket.close(code=4001)
         return
 
-    session_id = await manager.connect(websocket, username)
-    logger.info(f"WebSocket 连接建立: {username} (session: {session_id[:8]}), 当前在线数: {len(manager.active_connections)}")
+    session_id = await manager.connect(websocket, username, channel)
+    logger.info(f"WebSocket 连接建立: {username} (session: {session_id[:8]}), channel: {channel}, 当前在线数: {len(manager.active_connections)}")
     
     try:
         while True:
@@ -223,18 +225,18 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                     message_content = data[8:]
                     if not message_content.strip():
                         continue
-                        
+
                     db = SessionLocal()
                     try:
                         user = db.query(User).filter(User.username == username).first()
                         if user:
-                            db_message = Message(content=message_content, user_id=user.id)
+                            db_message = Message(content=message_content, user_id=user.id, channel=channel)
                             db.add(db_message)
                             db.commit()
                             timestamp = db_message.created_at.strftime("%H:%M")
-                            broadcast_msg = f"NEW_MESSAGE:{username}:{message_content}:{timestamp}"
-                            await manager.broadcast_message(broadcast_msg)
-                            logger.info(f"消息广播: {username} -> {message_content[:30]}...")
+                            broadcast_msg = f"NEW_MESSAGE:{username}:{message_content}:{timestamp}:{channel}"
+                            await manager.broadcast_message(broadcast_msg, channel)
+                            logger.info(f"消息广播: {username} -> {message_content[:30]}... [{channel}]")
                     except Exception as e:
                         logger.error(f"保存消息失败: {e}")
                         db.rollback()
@@ -246,8 +248,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                 
     except WebSocketDisconnect:
         manager.disconnect(session_id)
-        await manager.broadcast_user_list()
-        logger.info(f"WebSocket 断开: {username} (session: {session_id[:8]}), 当前在线数: {len(manager.active_connections)}")
+        await manager.broadcast_user_list(channel)
+        logger.info(f"WebSocket 断开: {username} (session: {session_id[:8]}), channel: {channel}, 当前在线数: {len(manager.active_connections)}")
 
 @app.post("/register", response_model=schemas.UserResponse)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -275,8 +277,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/messages/", response_model=schemas.MessageResponse)
-def send_message(message: schemas.MessageCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_message = Message(content=message.content, user_id=current_user.id)
+def send_message(message: schemas.MessageCreate, channel: str = "default", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_message = Message(content=message.content, user_id=current_user.id, channel=channel)
     db.add(db_message)
     db.commit()
     db.refresh(db_message)
@@ -289,8 +291,8 @@ def send_message(message: schemas.MessageCreate, db: Session = Depends(get_db), 
     )
 
 @app.get("/messages/", response_model=List[schemas.MessageResponse])
-def get_messages(limit: int = 50, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    messages = db.query(Message, User.username).join(User, Message.user_id == User.id).order_by(Message.created_at.desc()).limit(limit).all()
+def get_messages(limit: int = 50, channel: str = "default", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    messages = db.query(Message, User.username).join(User, Message.user_id == User.id).filter(Message.channel == channel, Message.is_deleted == False).order_by(Message.created_at.desc()).limit(limit).all()
     result = []
     for msg, username in messages:
         result.append(schemas.MessageResponse(
@@ -304,17 +306,31 @@ def get_messages(limit: int = 50, db: Session = Depends(get_db), current_user: U
 
 @app.delete("/messages/all")
 def clear_all_messages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """清空所有历史消息"""
+    """软删除所有历史消息"""
+    try:
+        count = db.query(Message).filter(Message.is_deleted == False).count()
+        db.query(Message).filter(Message.is_deleted == False).update({"is_deleted": True})
+        db.commit()
+        logger.info(f"用户 {current_user.username} 软删除了 {count} 条历史消息")
+        return {"detail": f"Soft deleted {count} messages"}
+    except Exception as e:
+        logger.error(f"软删除消息失败: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to clear messages")
+
+@app.delete("/messages/all/force")
+def force_clear_all_messages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """强制删除所有历史消息（包括已软删除的）"""
     try:
         count = db.query(Message).count()
         db.query(Message).delete()
         db.commit()
-        logger.info(f"用户 {current_user.username} 清空了 {count} 条历史消息")
-        return {"detail": f"Cleared {count} messages"}
+        logger.info(f"用户 {current_user.username} 强制删除了 {count} 条历史消息")
+        return {"detail": f"Force deleted {count} messages"}
     except Exception as e:
-        logger.error(f"清空消息失败: {e}")
+        logger.error(f"强制删除消息失败: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to clear messages")
+        raise HTTPException(status_code=500, detail="Failed to force clear messages")
 
 @app.delete("/messages/{message_id}")
 def delete_message(message_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -332,12 +348,28 @@ def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 @app.get("/users/online")
-def get_online_users():
+def get_online_users(channel: Optional[str] = None):
     # 收集所有唯一的用户名
     user_list = set()
-    for session_id, (connection, username) in manager.active_connections.items():
-        user_list.add(username)
-    return {"online_users": list(user_list)}
+    for session_id, (connection, username, user_channel) in manager.active_connections.items():
+        if channel is None or user_channel == channel:
+            user_list.add(username)
+    return {"online_users": list(user_list), "channel": channel}
+
+@app.get("/channels")
+def get_channels(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """获取所有可用的频道"""
+    try:
+        # 查询所有有消息的频道
+        channels = db.query(Message.channel).filter(Message.is_deleted == False).distinct().all()
+        channel_list = [c[0] for c in channels if c[0]]
+        # 确保default频道在列表中
+        if "default" not in channel_list:
+            channel_list.append("default")
+        return {"channels": sorted(channel_list)}
+    except Exception as e:
+        logger.error(f"获取频道列表失败: {e}")
+        return {"channels": ["default"]}
 
 @app.get("/")
 async def root():
